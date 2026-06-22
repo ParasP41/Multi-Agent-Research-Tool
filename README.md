@@ -37,7 +37,7 @@ The result is a fully automated research assistant that produces citation-ground
 | UI | Streamlit `>=1.58.0` |
 | CLI Output | Rich `>=15.0.0` |
 | Package Manager | `uv` |
-| Runtime | Python 3.12+ |
+| Runtime | Python 3.11+ |
 | Config | `pyproject.toml` + `.env` · python-dotenv `>=1.2.2` |
 
 ---
@@ -62,7 +62,7 @@ Each node is responsible for one editorial role. The `review_router` function re
 
 ```
 .
-├── main.py                  # Entry point — invokes the compiled research graph
+├── main.py                  # Streamlit application entry point
 ├── pyproject.toml           # Project metadata and dependencies
 ├── req.txt                  # Pip-compatible requirements list
 ├── uv.lock                  # Deterministic lockfile (uv package manager)
@@ -144,7 +144,7 @@ User Input (topic)
 A LangGraph **ReAct** agent equipped with the `webSearchTool`.
 
 - **Responsibility**: execute a single search query and return a summary of findings
-- **Tool used**: `webSearchTool` — queries a search API (Tavily, SerpAPI, etc.) and returns ranked results
+- **Tool used**: `webSearchTool` — queries Tavily and returns ranked results
 - **LLM interaction**: the agent reasons about which results are most relevant and synthesises a coherent answer
 - **Called by**: `search_node`, once per query produced by the planner
 
@@ -234,7 +234,7 @@ flowchart LR
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.11+
 - [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
 - API keys for your chosen LLM provider and Tavily search
 
@@ -355,7 +355,7 @@ Make sure your virtual environment is active before running either mode.
 ### Streamlit UI (recommended)
 
 ```bash
-streamlit run app.py
+python -m streamlit run main.py
 ```
 
 The app opens automatically at `http://localhost:8501` in your browser. Enter a research topic in the input field and click **Run Research**. Progress, intermediate outputs, and the final report are streamed to the UI in real time.
@@ -363,7 +363,7 @@ The app opens automatically at `http://localhost:8501` in your browser. Enter a 
 ### CLI mode
 
 ```bash
-python main.py
+python pipelines/pipeline.py
 ```
 
 You will be prompted interactively:
@@ -411,7 +411,7 @@ Significantly improved after revision ...
 
 ### `main.py`
 
-Entry point. Prompts for a topic, calls `research_graph.invoke()`, and prints the final report and feedback to stdout. Also defines all LangGraph node functions, the `review_router`, and assembles the `StateGraph`.
+Streamlit application entry point. The full LangGraph research graph is defined in `pipelines/pipeline.py`.
 
 ### `agents/searchAgent.py`
 
@@ -443,11 +443,11 @@ An LLM chain that reads the report alongside the fact-check notes and produces s
 
 ### `tools/webSearchTool.py`
 
-A LangChain `Tool` wrapping a search API client (Tavily or SerpAPI). Accepts a query string and returns a formatted list of search results.
+A LangChain `Tool` wrapping the Tavily search API. Accepts a query string and returns a formatted list of search results.
 
 ### `tools/webScapeTool.py`
 
-A LangChain `Tool` wrapping an HTTP + HTML parser (requests + BeautifulSoup or Playwright). Accepts a URL and returns extracted page text, cleaned of navigation and boilerplate.
+A LangChain `Tool` wrapping Requests and BeautifulSoup. Accepts a URL and returns extracted page text, cleaned of navigation and boilerplate.
 
 ### `pipelines/pipeline.py`
 
@@ -459,7 +459,7 @@ Contains the compiled `research_graph` (`StateGraph.compile()`). Can be imported
 
 ### Planner prompt
 
-Instructs the model to act as a research strategist. It decomposes a broad topic into 4–6 specific, diverse queries designed to surface different facets of the subject (background, recent developments, expert opinions, statistics, counterarguments).
+Instructs the model to act as a research strategist. It generates exactly 5 specific, diverse queries designed to surface different facets of the subject (background, recent developments, expert opinions, statistics, counterarguments).
 
 ### Writer prompt
 
@@ -467,7 +467,7 @@ Takes the full research context plus any feedback from a previous critic pass. O
 
 ### Fact-checker prompt
 
-Provides both the source research and the draft report side-by-side. Instructs the model to output a structured list of claims, each marked as `[VERIFIED]`, `[UNVERIFIED]`, or `[INCORRECT]` with a brief rationale and supporting excerpt.
+Provides both the source research and the draft report side-by-side. Instructs the model to identify unsupported claims, missing evidence, contradictions, potential hallucinations, and inaccurate statements concisely.
 
 ### Critic prompt
 
@@ -486,7 +486,7 @@ class ResearchState(TypedDict):
     report: str            # Current draft of the report
     fact_check: str        # Fact-checker output for the current draft
     feedback: str          # Critic feedback (including Score: N/10)
-    revision_count: int    # Number of rewrite cycles completed
+    revision_count: int    # Number of critic passes completed
 ```
 
 All state fields are plain strings except `revision_count`. The entire state is passed to every node; each node returns only the keys it modifies.
@@ -506,7 +506,7 @@ def review_router(state: ResearchState) -> str:
     return "rewrite"       # Route back to writer_node
 ```
 
-The graph guarantees termination: even if the LLM consistently scores below 8, the pipeline exits after 2 revisions. The final report is whatever the last writer pass produced.
+The graph guarantees termination: it exits after a score of at least 8 or after two critic passes. With the current counter logic, this permits at most one rewrite.
 
 ---
 
